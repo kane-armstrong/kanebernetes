@@ -29,6 +29,10 @@ namespace Kanebernetes.Stack
 {
     public class KanbernetesStack : Pulumi.Stack
     {
+        [Output] public Output<string> SubnetId { get; set; }
+        [Output] public Output<string> KubeConfigRaw { get; set; }
+        [Output] public Output<string> RegistryId { get; set; }
+
         public KanbernetesStack()
         {
             var config = new Config();
@@ -45,7 +49,7 @@ namespace Kanebernetes.Stack
             ConfigureKubernetesCluster(azureResources, clusterOptions);
         }
 
-        private static AzureResourceBag CreateBaseAzureInfrastructure(Config config)
+        private AzureResourceBag CreateBaseAzureInfrastructure(Config config)
         {
             var location = config.Require("azure-location");
 
@@ -81,6 +85,8 @@ namespace Kanebernetes.Stack
                 ServiceEndpoints = new InputList<string> { "Microsoft.KeyVault", "Microsoft.Sql" }
             });
 
+            SubnetId = subnet.Id;
+
             var registry = new Registry("containers", new RegistryArgs
             {
                 ResourceGroupName = resourceGroup.Name,
@@ -88,6 +94,8 @@ namespace Kanebernetes.Stack
                 Sku = "Standard",
                 AdminEnabled = true
             });
+
+            RegistryId = registry.Id;
 
             var aksServicePrincipalPassword = new RandomPassword("kanebernetes-sp-password", new RandomPasswordArgs
             {
@@ -201,9 +209,7 @@ namespace Kanebernetes.Stack
                 }
             });
 
-            // TODO output subnet id so that we can make sqlvnetrules for sql instances
-            // TODO output AKS cluster config
-            // TODO output registry too
+            KubeConfigRaw = cluster.KubeConfigRaw;
 
             var provider = new Provider("pet-doctor-aks-provider", new ProviderArgs
             {
@@ -212,10 +218,8 @@ namespace Kanebernetes.Stack
 
             return new AzureResourceBag
             {
-                ResourceGroup = resourceGroup,
                 Cluster = cluster,
                 ClusterProvider = provider,
-                AksServicePrincipal = clusterAdServicePrincipal
             };
         }
 
@@ -309,9 +313,7 @@ namespace Kanebernetes.Stack
 
         private class AzureResourceBag
         {
-            public ResourceGroup ResourceGroup { get; set; }
             public KubernetesCluster Cluster { get; set; }
-            public ServicePrincipal AksServicePrincipal { get; set; }
             public Provider ClusterProvider { get; set; }
         }
     }

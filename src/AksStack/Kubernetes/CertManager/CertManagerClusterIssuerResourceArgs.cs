@@ -1,7 +1,7 @@
 ﻿using Pulumi;
 using Pulumi.Kubernetes.ApiExtensions;
 
-namespace AksStack.Kubernetes.CertManager
+namespace Kanebernetes.Stack.Kubernetes.CertManager
 {
     public class CertManagerClusterIssuerResourceArgs : CustomResourceArgs
     {

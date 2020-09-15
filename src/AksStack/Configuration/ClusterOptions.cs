@@ -1,4 +1,4 @@
-﻿namespace AksStack.Configuration
+﻿namespace Kanebernetes.Stack.Configuration
 {
     public class ClusterOptions
     {

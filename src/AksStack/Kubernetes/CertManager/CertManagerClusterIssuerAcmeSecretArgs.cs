@@ -1,6 +1,6 @@
 ﻿using Pulumi;
 
-namespace AksStack.Kubernetes.CertManager
+namespace Kanebernetes.Stack.Kubernetes.CertManager
 {
     public class CertManagerClusterIssuerAcmeSecretArgs : ResourceArgs
     {

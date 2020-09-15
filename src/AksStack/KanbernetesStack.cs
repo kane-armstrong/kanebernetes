@@ -1,5 +1,5 @@
-﻿using AksStack.Configuration;
-using AksStack.Kubernetes.CertManager;
+﻿using Kanebernetes.Stack.Configuration;
+using Kanebernetes.Stack.Kubernetes.CertManager;
 using Pulumi;
 using Pulumi.Azure.Authorization;
 using Pulumi.Azure.ContainerService;
@@ -25,11 +25,11 @@ using VirtualNetwork = Pulumi.Azure.Network.VirtualNetwork;
 using VirtualNetworkArgs = Pulumi.Azure.Network.VirtualNetworkArgs;
 // ReSharper disable UnusedVariable
 
-namespace AksStack
+namespace Kanebernetes.Stack
 {
-    public class AksStack : Stack
+    public class KanbernetesStack : Pulumi.Stack
     {
-        public AksStack()
+        public KanbernetesStack()
         {
             var config = new Config();
 

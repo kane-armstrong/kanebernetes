@@ -5,7 +5,7 @@ VisualStudioVersion = 16.0.30002.166
 MinimumVisualStudioVersion = 15.0.26124.0
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{44F8324B-37BC-49A9-B106-220706FFDCBA}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AksStack", "src\AksStack\AksStack.csproj", "{BF345A35-EBB2-4233-8744-92ECB4E12297}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Kanebernetes.Stack", "src\AksStack\Kanebernetes.Stack.csproj", "{BF345A35-EBB2-4233-8744-92ECB4E12297}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

@@ -1,10 +1,10 @@
 ﻿using System.Threading.Tasks;
 using Pulumi;
 
-namespace AksStack
+namespace Kanebernetes.Stack
 {
     class Program
     {
-        static Task<int> Main() => Deployment.RunAsync<AksStack>();
+        static Task<int> Main() => Deployment.RunAsync<KanbernetesStack>();
     }
 }

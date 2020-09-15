@@ -1,7 +1,7 @@
 ﻿using Pulumi;
 using Pulumi.Kubernetes.ApiExtensions;
 
-namespace AksStack.Kubernetes.AadPodIdentity
+namespace Kanebernetes.Stack.Kubernetes.AadPodIdentity
 {
     public class AzureIdentityResourceArgs : CustomResourceArgs
     {

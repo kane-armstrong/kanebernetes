@@ -20,3 +20,8 @@ Up:
 Down:
 
 `pulumi destroy`
+
+
+## Todos
+
+* (maybe) replace Pulumi with helm for installing cert-manager, nginx (or voyager), aad pod identity

@@ -1,47 +1,26 @@
-﻿using System;
-using System.IO;
-using System.Net;
-using System.Text;
-using AksStack.Configuration;
-using AksStack.Kubernetes.AadPodIdentity;
+﻿using AksStack.Configuration;
 using AksStack.Kubernetes.CertManager;
 using Pulumi;
-using Pulumi.Azure.AppInsights;
 using Pulumi.Azure.Authorization;
 using Pulumi.Azure.ContainerService;
 using Pulumi.Azure.ContainerService.Inputs;
 using Pulumi.Azure.Core;
-using Pulumi.Azure.KeyVault;
-using Pulumi.Azure.KeyVault.Inputs;
 using Pulumi.Azure.Network;
 using Pulumi.Azure.OperationalInsights;
 using Pulumi.Azure.OperationalInsights.Inputs;
-using Pulumi.Azure.Sql;
 using Pulumi.AzureAD;
-using Pulumi.Docker;
 using Pulumi.Kubernetes.Core.V1;
 using Pulumi.Kubernetes.Types.Inputs.Core.V1;
 using Pulumi.Kubernetes.Types.Inputs.Meta.V1;
-using Pulumi.Kubernetes.Types.Inputs.Networking.V1Beta1;
 using Pulumi.Kubernetes.Yaml;
 using Pulumi.Random;
 using Pulumi.Tls;
 using Application = Pulumi.AzureAD.Application;
 using ApplicationArgs = Pulumi.AzureAD.ApplicationArgs;
 using Config = Pulumi.Config;
-using ContainerArgs = Pulumi.Kubernetes.Types.Inputs.Core.V1.ContainerArgs;
 using CustomResource = Pulumi.Kubernetes.ApiExtensions.CustomResource;
-using Deployment = Pulumi.Kubernetes.Apps.V1.Deployment;
-using DeploymentArgs = Pulumi.Kubernetes.Types.Inputs.Apps.V1.DeploymentArgs;
-using DeploymentSpecArgs = Pulumi.Kubernetes.Types.Inputs.Apps.V1.DeploymentSpecArgs;
-using GetClientConfig = Pulumi.AzureAD.GetClientConfig;
-using Ingress = Pulumi.Kubernetes.Networking.V1Beta1.Ingress;
 using Provider = Pulumi.Kubernetes.Provider;
 using ProviderArgs = Pulumi.Kubernetes.ProviderArgs;
-using Secret = Pulumi.Kubernetes.Core.V1.Secret;
-using SecretArgs = Pulumi.Kubernetes.Types.Inputs.Core.V1.SecretArgs;
-using Service = Pulumi.Kubernetes.Core.V1.Service;
-using ServiceArgs = Pulumi.Kubernetes.Types.Inputs.Core.V1.ServiceArgs;
 using VirtualNetwork = Pulumi.Azure.Network.VirtualNetwork;
 using VirtualNetworkArgs = Pulumi.Azure.Network.VirtualNetworkArgs;
 // ReSharper disable UnusedVariable
@@ -56,41 +35,14 @@ namespace AksStack
 
             var azureResources = CreateBaseAzureInfrastructure(config);
 
-            var clusterOptions = new PetDoctorClusterOptions
+            var clusterOptions = new ClusterOptions
             {
                 Domain = config.Require("domain"),
                 Namespace = config.Require("kubernetes-namespace"),
-                CertificateIssuerAcmeEmail = config.Require("certmanager-acme-email"),
-                AppointmentApi = new ReplicaSetConfiguration
-                {
-                    AadPodIdentityBindingName = "appointments-api-pod-identity-binding",
-                    AadPodIdentityName = "appointments-api-pod-identity",
-                    AadPodIdentitySelector = "appointments-api",
-                    DeploymentName = "appointments-api",
-                    IngressName = "appointments-api-ingress",
-                    ServiceName = "appointments-api-svc",
-                    Image = azureResources.Registry.LoginServer.Apply(loginServer => $"{loginServer}/pet-doctor/appointments/api:{config.Require("versions-appointments-api")}"),
-                    Port = 80,
-                    ReplicaCount = 2,
-                    Cpu = new ResourceLimit
-                    {
-                        Request = "25m",
-                        Limit = "50m"
-                    },
-                    Memory = new ResourceLimit
-                    {
-                        Request = "250Mi",
-                        Limit = "400Mi"
-                    },
-                    SecretName = "appointments-api-secrets"
-                }
+                CertificateIssuerAcmeEmail = config.Require("certmanager-acme-email")
             };
 
             ConfigureKubernetesCluster(azureResources, clusterOptions);
-
-            var appointmentApiAzureResources = CreateAppointmentApiAzureResources(azureResources, config, clusterOptions.AppointmentApi.Image);
-
-            SetupAppointmentApiInKubernetes(azureResources, appointmentApiAzureResources, clusterOptions);
         }
 
         private static AzureResourceBag CreateBaseAzureInfrastructure(Config config)
@@ -107,63 +59,53 @@ namespace AksStack
             var sqlUser = config.RequireSecret("azure-sqlserver-username");
             var sqlPassword = config.RequireSecret("azure-sqlserver-password");
 
-            var tags = new InputMap<string>
+            var resourceGroup = new ResourceGroup("kanebernetes-rg", new ResourceGroupArgs
             {
-                { "Environment", environment },
-                { "CreatedBy", createdBy },
-                { "Owner", owner }
-            };
-
-            var resourceGroup = new ResourceGroup("pet-doctor-resource-group", new ResourceGroupArgs
-            {
-                Name = "pet-doctor",
-                Location = location,
-                Tags = tags
+                Name = "kanebernetes",
+                Location = location
             });
 
-            var vnet = new VirtualNetwork("pet-doctor-vnet", new VirtualNetworkArgs
+            var vnet = new VirtualNetwork("kanebernetes-vnet", new VirtualNetworkArgs
             {
                 ResourceGroupName = resourceGroup.Name,
-                Name = "petdoctorvnet",
-                AddressSpaces = { "10.0.0.0/8" },
-                Tags = tags
+                Name = "kanebernetes",
+                AddressSpaces = { "10.0.0.0/8" }
             });
 
-            var subnet = new Subnet("pet-doctor-subnet", new SubnetArgs
+            var subnet = new Subnet("kanebernetes-subnet", new SubnetArgs
             {
                 ResourceGroupName = resourceGroup.Name,
-                Name = "petdoctorsubet",
+                Name = "kanebernetes",
                 AddressPrefixes = { "10.240.0.0/16" },
                 VirtualNetworkName = vnet.Name,
                 ServiceEndpoints = new InputList<string> { "Microsoft.KeyVault", "Microsoft.Sql" }
             });
 
-            var registry = new Registry("pet-doctor-acr", new RegistryArgs
+            var registry = new Registry("containers", new RegistryArgs
             {
                 ResourceGroupName = resourceGroup.Name,
-                Name = "petdoctoracr",
+                Name = "containers",
                 Sku = "Standard",
-                AdminEnabled = true,
-                Tags = tags
+                AdminEnabled = true
             });
 
-            var aksServicePrincipalPassword = new RandomPassword("pet-doctor-aks-ad-sp-password", new RandomPasswordArgs
+            var aksServicePrincipalPassword = new RandomPassword("kanebernetes-sp-password", new RandomPasswordArgs
             {
                 Length = 20,
                 Special = true,
             }).Result;
 
-            var clusterAdApp = new Application("pet-doctor-aks-ad-app", new ApplicationArgs
+            var clusterAdApp = new Application("kanebernetes-app", new ApplicationArgs
             {
-                Name = "petdoctoraks"
+                Name = "kanebernetes"
             });
 
-            var clusterAdServicePrincipal = new ServicePrincipal("aks-app-sp", new ServicePrincipalArgs
+            var clusterAdServicePrincipal = new ServicePrincipal("kanebernetes-sp", new ServicePrincipalArgs
             {
                 ApplicationId = clusterAdApp.ApplicationId
             });
 
-            var clusterAdServicePrincipalPassword = new ServicePrincipalPassword("aks-app-sp-pwd", new ServicePrincipalPasswordArgs
+            var clusterAdServicePrincipalPassword = new ServicePrincipalPassword("kanebernetes-sp-pwd", new ServicePrincipalPasswordArgs
             {
                 ServicePrincipalId = clusterAdServicePrincipal.ObjectId,
                 EndDate = "2099-01-01T00:00:00Z",
@@ -171,29 +113,28 @@ namespace AksStack
             });
 
             // Grant networking permissions to the SP (needed e.g. to provision Load Balancers)
-            var subnetAssignment = new Assignment("pet-doctor-aks-sp-subnet-assignment", new AssignmentArgs
+            var subnetAssignment = new Assignment("kanebernetes-subnet-assignment", new AssignmentArgs
             {
                 PrincipalId = clusterAdServicePrincipal.Id,
                 RoleDefinitionName = "Network Contributor",
                 Scope = subnet.Id
             });
 
-            var acrAssignment = new Assignment("pet-doctor-aks-sp-acr-assignment", new AssignmentArgs
+            var acrAssignment = new Assignment("kanebernetes-acr-assignment", new AssignmentArgs
             {
                 PrincipalId = clusterAdServicePrincipal.Id,
                 RoleDefinitionName = "AcrPull",
                 Scope = registry.Id
             });
 
-            var logAnalyticsWorkspace = new AnalyticsWorkspace("pet-doctor-aks-log-analytics", new AnalyticsWorkspaceArgs
+            var logAnalyticsWorkspace = new AnalyticsWorkspace("kanebernetes-analytics-ws", new AnalyticsWorkspaceArgs
             {
                 ResourceGroupName = resourceGroup.Name,
-                Name = "petdoctorloganalytics",
-                Sku = "PerGB2018",
-                Tags = tags
+                Name = "kanebernetesloganalytics",
+                Sku = "PerGB2018"
             });
 
-            var logAnalyticsSolution = new AnalyticsSolution("pet-doctor-aks-analytics-solution", new AnalyticsSolutionArgs
+            var logAnalyticsSolution = new AnalyticsSolution("kanebernetes-analytics-sln", new AnalyticsSolutionArgs
             {
                 ResourceGroupName = resourceGroup.Name,
                 SolutionName = "ContainerInsights",
@@ -212,10 +153,10 @@ namespace AksStack
                 RsaBits = 4096,
             });
 
-            var cluster = new KubernetesCluster("pet-doctor-aks", new KubernetesClusterArgs
+            var cluster = new KubernetesCluster("kanebernetes-aks", new KubernetesClusterArgs
             {
                 ResourceGroupName = resourceGroup.Name,
-                Name = "petdoctoraks",
+                Name = "kanebernetes",
                 DnsPrefix = "dns",
                 KubernetesVersion = kubernetesVersion,
                 DefaultNodePool = new KubernetesClusterDefaultNodePoolArgs
@@ -257,35 +198,12 @@ namespace AksStack
                         Enabled = true,
                         LogAnalyticsWorkspaceId = logAnalyticsWorkspace.Id
                     }
-                },
-                Tags = tags
+                }
             });
 
-            var sqlServer = new SqlServer("pet-doctor-sql", new SqlServerArgs
-            {
-                ResourceGroupName = resourceGroup.Name,
-                Name = "petdoctorsql",
-                Tags = tags,
-                Version = "12.0",
-                AdministratorLogin = sqlUser,
-                AdministratorLoginPassword = sqlPassword
-            });
-
-            var sqlvnetrule = new VirtualNetworkRule("pet-doctor-sql", new VirtualNetworkRuleArgs
-            {
-                ResourceGroupName = resourceGroup.Name,
-                Name = "petdoctorsql",
-                ServerName = sqlServer.Name,
-                SubnetId = subnet.Id,
-            });
-
-            var appInsights = new Insights("pet-doctor-ai", new InsightsArgs
-            {
-                ApplicationType = "web",
-                Name = "petdoctor",
-                ResourceGroupName = resourceGroup.Name,
-                Tags = tags
-            });
+            // TODO output subnet id so that we can make sqlvnetrules for sql instances
+            // TODO output AKS cluster config
+            // TODO output registry too
 
             var provider = new Provider("pet-doctor-aks-provider", new ProviderArgs
             {
@@ -295,18 +213,13 @@ namespace AksStack
             return new AzureResourceBag
             {
                 ResourceGroup = resourceGroup,
-                SqlServer = sqlServer,
                 Cluster = cluster,
                 ClusterProvider = provider,
-                AppInsights = appInsights,
-                AksServicePrincipal = clusterAdServicePrincipal,
-                Subnet = subnet,
-                Registry = registry,
-                Tags = tags
+                AksServicePrincipal = clusterAdServicePrincipal
             };
         }
 
-        private static void ConfigureKubernetesCluster(AzureResourceBag azureResources, PetDoctorClusterOptions clusterOptions)
+        private static void ConfigureKubernetesCluster(AzureResourceBag azureResources, ClusterOptions clusterOptions)
         {
             var componentOpts = new ComponentResourceOptions
             {
@@ -394,429 +307,12 @@ namespace AksStack
             }, customOpts);
         }
 
-        private static AppointmentApiAzureResourceBag CreateAppointmentApiAzureResources(AzureResourceBag azureResources, Config config, Input<string> registryImageName)
-        {
-            var tenantId = config.Require("azure-tenantid");
-
-            var appointmentApiDb = new Database("appointments-api-db", new DatabaseArgs
-            {
-                ResourceGroupName = azureResources.ResourceGroup.Name,
-                Name = "appointment-api",
-                ServerName = azureResources.SqlServer.Name,
-                RequestedServiceObjectiveName = "S0",
-                Tags = azureResources.Tags
-            });
-
-            var image = new Image("appointments-api-docker-image", new ImageArgs
-            {
-                Build = $".{Path.DirectorySeparatorChar}..{Path.DirectorySeparatorChar}..{Path.DirectorySeparatorChar}",
-                Registry = new ImageRegistry
-                {
-                    Server = azureResources.Registry.LoginServer,
-                    Username = azureResources.Registry.AdminUsername,
-                    Password = azureResources.Registry.AdminPassword
-                },
-                ImageName = registryImageName
-            }, new ComponentResourceOptions
-            {
-                DependsOn = new InputList<Resource> { azureResources.Registry }
-            });
-
-            var appointmentApiIdentity = new UserAssignedIdentity("appointments-api", new UserAssignedIdentityArgs
-            {
-                ResourceGroupName = azureResources.ResourceGroup.Name,
-                Name = "appointments-api",
-                Tags = azureResources.Tags
-            });
-
-            // AKS service principal needs to have Managed Identity Operator rights over the user assigned identity else AAD pod identity won't work
-            var aksSpAppointmentApiAccessPolicy = new Assignment("aks-sp-appontment-api-access", new AssignmentArgs
-            {
-                PrincipalId = azureResources.AksServicePrincipal.ObjectId,
-                RoleDefinitionName = "Managed Identity Operator",
-                Scope = appointmentApiIdentity.Id
-            });
-
-            var sqlAdmin = new ActiveDirectoryAdministrator("appointments-api-sql-access", new ActiveDirectoryAdministratorArgs
-            {
-                ResourceGroupName = azureResources.ResourceGroup.Name,
-                TenantId = tenantId,
-                ObjectId = appointmentApiIdentity.PrincipalId,
-                Login = "sqladmin",
-                ServerName = azureResources.SqlServer.Name
-            });
-
-            var clientConfig = Output.Create(GetClientConfig.InvokeAsync());
-            var currentPrincipalTenantId = clientConfig.Apply(c => c.TenantId);
-            var currentPrincipal = clientConfig.Apply(c => c.ObjectId);
-
-            var appointmentApiKeyVault = new KeyVault("appointment-api-keyvault", new KeyVaultArgs
-            {
-                ResourceGroupName = azureResources.ResourceGroup.Name,
-                Name = "appointments-api",
-                EnabledForDiskEncryption = true,
-                TenantId = tenantId,
-                SkuName = "standard",
-                AccessPolicies = new InputList<KeyVaultAccessPolicyArgs>
-                {
-                    new KeyVaultAccessPolicyArgs
-                    {
-                        TenantId = tenantId,
-                        ObjectId = azureResources.AksServicePrincipal.ObjectId,
-                        SecretPermissions = new[] {"get", "list"}
-                    },
-                    new KeyVaultAccessPolicyArgs
-                    {
-                        TenantId = tenantId,
-                        ObjectId = appointmentApiIdentity.PrincipalId,
-                        SecretPermissions = new[] {"get", "list"}
-                    },
-                    new KeyVaultAccessPolicyArgs
-                    {
-                        TenantId = currentPrincipalTenantId,
-                        ObjectId = currentPrincipal,
-                        SecretPermissions = {"delete", "get", "list", "set"},
-                    }
-                },
-                NetworkAcls = new KeyVaultNetworkAclsArgs
-                {
-                    DefaultAction = "Deny",
-                    Bypass = "AzureServices",
-                    VirtualNetworkSubnetIds = new InputList<string>
-                    {
-                        azureResources.Subnet.Id
-                    },
-                    // Need to whitelist the local public IP address otherwise setting secrets will fail
-                    IpRules = new InputList<string>
-                    {
-                        GetMyPublicIpAddress()
-                    }
-                },
-                Tags = azureResources.Tags
-            });
-
-            var secret = new Pulumi.Azure.KeyVault.Secret("appointments-api-db-connection-string",
-                new Pulumi.Azure.KeyVault.SecretArgs
-                {
-                    KeyVaultId = appointmentApiKeyVault.Id,
-                    Name = "ConnectionStrings--PetDoctorContext",
-                    Value = Output.Tuple(azureResources.SqlServer.Name, azureResources.SqlServer.Name,
-                        azureResources.SqlServer.AdministratorLogin, azureResources.SqlServer.AdministratorLoginPassword).Apply(
-                        t =>
-                        {
-                            var (server, database, administratorLogin, administratorLoginPassword) = t;
-                            return
-                                $"Server=tcp:{server}.database.windows.net;Database={database};User ID={administratorLogin};Password={administratorLoginPassword}";
-                        })
-                }, new CustomResourceOptions
-                {
-                    DependsOn = new InputList<Resource>
-                    {
-                        azureResources.SqlServer,
-                        appointmentApiKeyVault
-                    }
-                });
-
-            return new AppointmentApiAzureResourceBag
-            {
-                Identity = appointmentApiIdentity,
-                KeyVault = appointmentApiKeyVault
-            };
-        }
-
-        private static void SetupAppointmentApiInKubernetes(AzureResourceBag azureResources, AppointmentApiAzureResourceBag appointmentApiAzureResources, PetDoctorClusterOptions clusterOptions)
-        {
-            var customOpts = new CustomResourceOptions
-            {
-                DependsOn = azureResources.Cluster,
-                Provider = azureResources.ClusterProvider
-            };
-
-            var secret = new Secret(clusterOptions.AppointmentApi.SecretName, new SecretArgs
-            {
-                Metadata = new ObjectMetaArgs
-                {
-                    Namespace = clusterOptions.Namespace,
-                    Name = clusterOptions.AppointmentApi.SecretName
-                },
-                Kind = "Secret",
-                ApiVersion = "v1",
-                Type = "Opaque",
-                Data = new InputMap<string>
-                {
-                    { "keyvault-url", appointmentApiAzureResources.KeyVault.VaultUri.Apply(kvUrl => Convert.ToBase64String(Encoding.UTF8.GetBytes(kvUrl))) },
-                    { "appinsights-instrumentationkey", azureResources.AppInsights.InstrumentationKey.Apply(key => Convert.ToBase64String(Encoding.UTF8.GetBytes(key))) }
-                }
-            }, customOpts);
-
-            var appointmentApiPodIdentity = new CustomResource(clusterOptions.AppointmentApi.AadPodIdentityName,
-                new AzureIdentityResourceArgs
-                {
-                    Metadata = new ObjectMetaArgs
-                    {
-                        Name = clusterOptions.AppointmentApi.AadPodIdentityName
-                    },
-                    Spec = new AzureIdentitySpecArgs
-                    {
-                        Type = 0,
-                        ResourceId = appointmentApiAzureResources.Identity.Id,
-                        ClientId = appointmentApiAzureResources.Identity.ClientId
-                    }
-                }, customOpts);
-
-            var appointmentApiPodIdentityBinding = new CustomResource(clusterOptions.AppointmentApi.AadPodIdentityBindingName,
-                new AzureIdentityBindingResourceArgs
-                {
-                    Metadata = new ObjectMetaArgs
-                    {
-                        Name = clusterOptions.AppointmentApi.AadPodIdentityBindingName
-                    },
-                    Spec = new AzureIdentityBindingSpecArgs
-                    {
-                        AzureIdentity = clusterOptions.AppointmentApi.AadPodIdentityName,
-                        Selector = clusterOptions.AppointmentApi.AadPodIdentitySelector
-                    }
-                }, new CustomResourceOptions
-                {
-                    DependsOn = new InputList<Resource> { azureResources.Cluster, appointmentApiAzureResources.Identity },
-                    Provider = azureResources.ClusterProvider
-                });
-
-            var appointmentApiDeployment = new Deployment("appointment-api-deployment", new DeploymentArgs
-            {
-                ApiVersion = "apps/v1beta1",
-                Kind = "Deployment",
-                Metadata = new ObjectMetaArgs
-                {
-                    Name = clusterOptions.AppointmentApi.DeploymentName,
-                    Namespace = clusterOptions.Namespace,
-                    Labels = new InputMap<string>
-                    {
-                        {"app", clusterOptions.AppointmentApi.DeploymentName},
-                        {"aadpodidbinding", clusterOptions.AppointmentApi.AadPodIdentitySelector}
-                    }
-                },
-                Spec = new DeploymentSpecArgs
-                {
-                    Replicas = clusterOptions.AppointmentApi.ReplicaCount,
-                    Selector = new LabelSelectorArgs
-                    {
-                        MatchLabels = new InputMap<string>
-                        {
-                            {"app", clusterOptions.AppointmentApi.DeploymentName}
-                        }
-                    },
-                    Template = new PodTemplateSpecArgs
-                    {
-                        Metadata = new ObjectMetaArgs
-                        {
-                            Labels = new InputMap<string>
-                            {
-                                {"app", clusterOptions.AppointmentApi.DeploymentName},
-                                {"aadpodidbinding", clusterOptions.AppointmentApi.AadPodIdentitySelector}
-                            }
-                        },
-                        Spec = new PodSpecArgs
-                        {
-                            Containers = new InputList<ContainerArgs>
-                            {
-                                new ContainerArgs
-                                {
-                                    Name = clusterOptions.AppointmentApi.DeploymentName,
-                                    Image = clusterOptions.AppointmentApi.Image,
-                                    Ports = new InputList<ContainerPortArgs>
-                                    {
-                                        new ContainerPortArgs
-                                        {
-                                            ContainerPortValue = clusterOptions.AppointmentApi.Port,
-                                            Protocol = "TCP"
-                                        }
-                                    },
-                                    ReadinessProbe = new ProbeArgs
-                                    {
-                                        HttpGet = new HTTPGetActionArgs
-                                        {
-                                            Port = clusterOptions.AppointmentApi.Port,
-                                            Path = "/ready",
-                                            Scheme = "HTTP"
-                                        },
-                                        InitialDelaySeconds = 15,
-                                        TimeoutSeconds = 2,
-                                        PeriodSeconds = 10,
-                                        FailureThreshold = 3
-                                    },
-                                    LivenessProbe = new ProbeArgs
-                                    {
-                                        HttpGet = new HTTPGetActionArgs
-                                        {
-                                            Port = clusterOptions.AppointmentApi.Port,
-                                            Path = "/live",
-                                            Scheme = "HTTP"
-                                        },
-                                        InitialDelaySeconds = 30,
-                                        TimeoutSeconds = 2,
-                                        PeriodSeconds = 5,
-                                        FailureThreshold = 3
-                                    },
-                                    Env = new InputList<EnvVarArgs>
-                                    {
-                                        new EnvVarArgs
-                                        {
-                                            Name = "ASPNETCORE_ENVIRONMENT",
-                                            Value = "Production"
-                                        },
-                                        new EnvVarArgs
-                                        {
-                                            Name = "KEYVAULT__URL",
-                                            ValueFrom = new EnvVarSourceArgs
-                                            {
-                                                SecretKeyRef = new SecretKeySelectorArgs
-                                                {
-                                                    Name = clusterOptions.AppointmentApi.SecretName,
-                                                    Key = "keyvault-url"
-                                                }
-                                            }
-                                        },
-                                        new EnvVarArgs
-                                        {
-                                            Name = "APPLICATIONINSIGHTS__INSTRUMENTATIONKEY",
-                                            ValueFrom = new EnvVarSourceArgs
-                                            {
-                                                SecretKeyRef = new SecretKeySelectorArgs
-                                                {
-                                                    Name = clusterOptions.AppointmentApi.SecretName,
-                                                    Key = "appinsights-instrumentationkey"
-                                                }
-                                            }
-                                        },
-                                        new EnvVarArgs
-                                        {
-                                            Name = "HOSTENV",
-                                            Value = "K8S"
-                                        },
-                                        new EnvVarArgs
-                                        {
-                                            Name = "PATH_BASE",
-                                            Value = "api"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }, new CustomResourceOptions
-            {
-                DependsOn = new InputList<Resource> { azureResources.Cluster, appointmentApiAzureResources.Identity, appointmentApiPodIdentityBinding },
-                Provider = azureResources.ClusterProvider
-            });
-
-            var appointmentApiService = new Service(clusterOptions.AppointmentApi.ServiceName, new ServiceArgs
-            {
-                ApiVersion = "v1",
-                Kind = "Service",
-                Metadata = new ObjectMetaArgs
-                {
-                    Name = clusterOptions.AppointmentApi.ServiceName,
-                    Namespace = clusterOptions.Namespace
-                },
-                Spec = new ServiceSpecArgs
-                {
-                    Selector = new InputMap<string>
-                    {
-                        {"app", clusterOptions.AppointmentApi.DeploymentName}
-                    },
-                    Type = "ClusterIP",
-                    ClusterIP = "None",
-                    Ports = new InputList<ServicePortArgs>
-                    {
-                        new ServicePortArgs
-                        {
-                            Name = "http",
-                            Protocol = "TCP",
-                            Port = 80,
-                            TargetPort = clusterOptions.AppointmentApi.Port
-                        }
-                    }
-                }
-            }, customOpts);
-
-            var appointmentApiIngress = new Ingress(clusterOptions.AppointmentApi.IngressName, new IngressArgs
-            {
-                ApiVersion = "extensions/v1beta1",
-                Kind = "Ingress",
-                Metadata = new ObjectMetaArgs
-                {
-                    Name = clusterOptions.AppointmentApi.IngressName,
-                    Namespace = clusterOptions.Namespace,
-                    Annotations = new InputMap<string>
-                    {
-                        {"kubernetes.io/ingress.class", "nginx"},
-                        {"certmanager.k8s.io/cluster-issuer", "letsencrypt-prod"}
-                    }
-                },
-                Spec = new IngressSpecArgs
-                {
-                    Tls = new InputList<IngressTLSArgs>
-                    {
-                        new IngressTLSArgs
-                        {
-                            Hosts = new InputList<string>
-                            {
-                                clusterOptions.Domain
-                            },
-                            SecretName = "tls-secret"
-                        }
-                    },
-                    Rules = new InputList<IngressRuleArgs>
-                    {
-                        new IngressRuleArgs
-                        {
-                            Host = clusterOptions.Domain,
-                            Http = new HTTPIngressRuleValueArgs
-                            {
-                                Paths = new InputList<HTTPIngressPathArgs>
-                                {
-                                    new HTTPIngressPathArgs
-                                    {
-                                        Path = "/api",
-                                        Backend = new IngressBackendArgs
-                                        {
-                                            ServiceName = clusterOptions.AppointmentApi.ServiceName,
-                                            ServicePort = clusterOptions.AppointmentApi.Port
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }, customOpts);
-        }
-
-        public static string GetMyPublicIpAddress()
-        {
-            using var wc = new WebClient();
-            return wc.DownloadString("http://icanhazip.com");
-        }
-
         private class AzureResourceBag
         {
             public ResourceGroup ResourceGroup { get; set; }
-            public SqlServer SqlServer { get; set; }
             public KubernetesCluster Cluster { get; set; }
-            public Insights AppInsights { get; set; }
-            public InputMap<string> Tags { get; set; }
             public ServicePrincipal AksServicePrincipal { get; set; }
-            public Subnet Subnet { get; set; }
             public Provider ClusterProvider { get; set; }
-            public Registry Registry { get; set; }
-        }
-
-        private class AppointmentApiAzureResourceBag
-        {
-            public UserAssignedIdentity Identity { get; set; }
-            public KeyVault KeyVault { get; set; }
         }
     }
 }
